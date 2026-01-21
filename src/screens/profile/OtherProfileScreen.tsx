@@ -6,7 +6,7 @@ import { DefaultProfilePhoto } from '../../components/profile/DefaultProfilePhot
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { ProfileSong, TopArtist } from '../../types/spotify.types';
-import { getProfileSongs, getTopArtistsFromDB } from '../../services/profileService';
+import { getProfileSongs, getTopArtistsFromDB, getProfileBySupabaseId } from '../../services/profileService';
 import { getFollowerCount, getFollowingCount, followUser, unfollowUser, getFollowStatus } from '../../services/followService';
 import { useAuth } from '../../contexts/AuthContext';
 import { UserProfile } from '../../types/auth.types';
@@ -14,19 +14,20 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 
 type OtherProfileRouteParams = {
     OtherProfile: {
-        userId: string;
-        profile: UserProfile;
+        userId?: string;
+        profile?: UserProfile;
     };
 };
 
 export function OtherProfileScreen() {
     const navigation = useNavigation();
     const route = useRoute<RouteProp<OtherProfileRouteParams, 'OtherProfile'>>();
-    const { profile } = route.params;
+    const params = route.params;
 
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
 
+    const [currentProfile, setCurrentProfile] = useState<UserProfile | null>(params.profile || null);
     const [profileSongs, setProfileSongs] = useState<ProfileSong[]>([]);
     const [topArtists, setTopArtists] = useState<TopArtist[]>([]);
     const [followerCount, setFollowerCount] = useState(0);
@@ -36,36 +37,56 @@ export function OtherProfileScreen() {
     const [isPageLoading, setIsPageLoading] = useState(true);
 
     useEffect(() => {
-        const fetchData = async () => {
+        const initData = async () => {
             setIsPageLoading(true);
+            try {
+                let targetProfile = currentProfile;
 
-            // Paralel olarak tüm verileri çek
-            const [songs, followers, following, artists] = await Promise.all([
-                getProfileSongs(profile.id),
-                getFollowerCount(profile.id),
-                getFollowingCount(profile.id),
-                getTopArtistsFromDB(profile.id)
-            ]);
+                // 1. Profil datası yoksa (id ile gelindiyse) çek
+                if (!targetProfile && params.userId) {
+                    const fetched = await getProfileBySupabaseId(params.userId);
+                    if (fetched) {
+                        targetProfile = fetched;
+                        setCurrentProfile(fetched);
+                    }
+                }
 
-            setProfileSongs(songs);
-            setFollowerCount(followers);
-            setFollowingCount(following);
-            setTopArtists(artists);
+                if (!targetProfile) {
+                    setIsPageLoading(false);
+                    return; // Hata veya bulunamadı
+                }
 
-            // Takip durumunu kontrol et
-            if (user?.id) {
-                const status = await getFollowStatus(user.id, profile.id);
-                setIsFollowing(status === 'following');
+                // 2. Diğer verileri çek
+                const [songs, followers, following, artists] = await Promise.all([
+                    getProfileSongs(targetProfile.id),
+                    getFollowerCount(targetProfile.id),
+                    getFollowingCount(targetProfile.id),
+                    getTopArtistsFromDB(targetProfile.id)
+                ]);
+
+                setProfileSongs(songs);
+                setFollowerCount(followers);
+                setFollowingCount(following);
+                setTopArtists(artists);
+
+                // 3. Takip durumu
+                if (user?.id) {
+                    const status = await getFollowStatus(user.id, targetProfile.id);
+                    setIsFollowing(status === 'following');
+                }
+
+            } catch (error) {
+                console.error('OtherProfile init error:', error);
+            } finally {
+                setIsPageLoading(false);
             }
-
-            setIsPageLoading(false);
         };
 
-        fetchData();
-    }, [profile.id, user?.id]);
+        initData();
+    }, [params.userId, params.profile, user?.id]);
 
     const handleFollowPress = async () => {
-        if (!user?.id || isLoading) return;
+        if (!user?.id || isLoading || !currentProfile) return;
 
         setIsLoading(true);
 
@@ -75,8 +96,8 @@ export function OtherProfileScreen() {
         setFollowerCount(prev => wasFollowing ? prev - 1 : prev + 1);
 
         const success = wasFollowing
-            ? await unfollowUser(user.id, profile.id)
-            : await followUser(user.id, profile.id);
+            ? await unfollowUser(user.id, currentProfile.id)
+            : await followUser(user.id, currentProfile.id);
 
         // Hata varsa geri al
         if (!success) {
@@ -88,15 +109,32 @@ export function OtherProfileScreen() {
     };
 
     const handleMessagePress = () => {
+        if (!currentProfile) return;
         (navigation as any).navigate('Chat', {
             otherUser: {
-                id: profile.id,
-                username: profile.username,
-                display_name: profile.display_name,
-                avatar_url: profile.avatar_url
+                id: currentProfile.id,
+                username: currentProfile.username,
+                display_name: currentProfile.display_name,
+                avatar_url: currentProfile.avatar_url
             }
         });
     };
+
+    if (isPageLoading) {
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background }}>
+                <Text style={{ color: COLORS.text }}>Yükleniyor...</Text>
+            </View>
+        );
+    }
+
+    if (!currentProfile) {
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background }}>
+                <Text style={{ color: COLORS.text }}>Kullanıcı bulunamadı.</Text>
+            </View>
+        );
+    }
 
     return (
         <LinearGradient
@@ -121,8 +159,8 @@ export function OtherProfileScreen() {
                 >
                     {/* Photo Area */}
                     <View style={styles.photoArea}>
-                        {profile.avatar_url ? (
-                            <Image source={{ uri: profile.avatar_url }} style={styles.profilePhoto} />
+                        {currentProfile.avatar_url ? (
+                            <Image source={{ uri: currentProfile.avatar_url }} style={styles.profilePhoto} />
                         ) : (
                             <DefaultProfilePhoto />
                         )}
@@ -130,10 +168,10 @@ export function OtherProfileScreen() {
 
                     {/* Bio Area */}
                     <View style={styles.bioArea}>
-                        <Text style={styles.textName}>{profile.display_name}</Text>
-                        <Text style={styles.textUserName}>@{profile.username}</Text>
-                        {profile.bio && (
-                            <Text style={styles.textBio}>{profile.bio}</Text>
+                        <Text style={styles.textName}>{currentProfile.display_name}</Text>
+                        <Text style={styles.textUserName}>@{currentProfile.username}</Text>
+                        {currentProfile.bio && (
+                            <Text style={styles.textBio}>{currentProfile.bio}</Text>
                         )}
                     </View>
 

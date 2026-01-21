@@ -7,7 +7,9 @@ import {
     TouchableOpacity,
     KeyboardAvoidingView,
     Platform,
-    Image
+    Image,
+    AppState,
+    AppStateStatus
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -46,6 +48,10 @@ export function ChatScreen() {
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
     const flashListRef = useRef<any>(null);
+    const hasLoadedMessages = useRef(false);
+    const appState = useRef<AppStateStatus>(AppState.currentState);
+
+
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputText, setInputText] = useState('');
@@ -58,20 +64,47 @@ export function ChatScreen() {
 
     const conversationId = user?.id ? generateConversationId(user.id, otherUser.id) : '';
 
+    // AppState listener
+    useEffect(() => {
+        const subscription = AppState.addEventListener('change', nextAppState => {
+            if (
+                appState.current.match(/inactive|background/) &&
+                nextAppState === 'active'
+            ) {
+                console.log('📱 App foregrounda geldi, mesajlar okundu işaretleniyor');
+                if (user?.id && conversationId) {
+                    markMessagesAsRead(conversationId, user.id);
+                }
+            }
+
+            appState.current = nextAppState;
+        });
+
+        return () => {
+            subscription.remove();
+        };
+    }, [conversationId, user?.id]);
+
     // Mesajları yükle
     useEffect(() => {
         if (!conversationId) return;
 
         const loadMessages = async () => {
             setIsLoading(true);
-            const msgs = await getMessages(conversationId);
+            const msgs = await getMessages(conversationId, user?.id);
             setMessages(msgs);
             setIsLoading(false);
 
-            // Mesajları okundu olarak işaretle
+            // Mesajları okundu olarak işaretle - SADECE app foreground'daysa
             if (user?.id) {
-                await markMessagesAsRead(conversationId, user.id);
+                if (AppState.currentState === 'active') {
+                    await markMessagesAsRead(conversationId, user.id);
+                    console.log('✅ Mesajlar okundu işaretlendi (app active)');
+                } else {
+                    console.log('⏸️ App background, mesajlar okundu işaretlenmedi');
+                }
             }
+
         };
 
         loadMessages();
@@ -119,7 +152,13 @@ export function ChatScreen() {
             });
 
             if (newMessage.receiver_id === user?.id) {
-                markMessagesAsRead(conversationId, user.id);
+                // SADECE app foreground'daysa okundu işaretle
+                if (AppState.currentState === 'active') {
+                    markMessagesAsRead(conversationId, user.id);
+                    console.log('✅ Yeni mesaj okundu işaretlendi (app active)');
+                } else {
+                    console.log('⏸️ Yeni mesaj geldi ama app background, okundu işaretlenmedi');
+                }
             }
         });
 
@@ -143,8 +182,69 @@ export function ChatScreen() {
                 (payload) => {
                     const updated = payload.new as Message;
                     setMessages(prev => prev.map(m =>
-                        m.id === updated.id ? { ...m, is_read: updated.is_read } : m
+                        m.id === updated.id ? { ...m, is_read: updated.is_read, hidden_for: updated.hidden_for } : m
                     ));
+
+                    // hidden_for güncellemesi için de kontrol et
+                    if (user?.id && updated.hidden_for?.includes(user.id)) {
+                        console.log('🔒 Mesaj gizlendi, listeyi yeniden yükle');
+                        getMessages(conversationId, user?.id).then(msgs => {
+                            console.log('📬 UPDATE sonrası mesaj sayısı:', msgs.length);
+                            setMessages(msgs);
+
+                            if (hasLoadedMessages.current && msgs.length === 0) {
+                                console.log('📴 Tüm mesajlar gizlendi, ChatScreen kapanıyor');
+                                setTimeout(() => {
+                                    (navigation as any).goBack();
+                                }, 500);
+                            }
+                        });
+                    }
+                }
+            )
+            .on(
+                'postgres_changes',
+                {
+                    event: 'DELETE',
+                    schema: 'public',
+                    table: 'messages'
+                    // Filter kaldırdık çünkü DELETE eventinde conversation_id gelmeyebilir (REPLICA IDENTITY FULL değilse)
+                    // RLS zaten sadece bizim görebileceğimiz silmeleri gönderecek
+                },
+                (payload) => {
+                    const deletedId = payload.old?.id;
+                    console.log('🗑️ DELETE event alındı wait filter:', deletedId);
+
+                    // Silinen mesaj bu sohbette mi? (State'deki mesajlardan kontrol et)
+                    // Not: messages state'ine closure içinde erişemeyebiliriz, getMessages ile kontrol daha sağlıklı
+                    // Ama performans için önce basit bir "yenile" yapalım
+
+                    // Güvenli yöntem: Her silme işleminde (bizim ilgilendiğimiz mesajlardan biri olabilir)
+                    // Conversation ID kontrol edemiyoruz, o yüzden her DELETE'de bu sohbeti kontrol et
+
+                    getMessages(conversationId, user?.id).then(msgs => {
+                        // Eğer mesaj sayısı değiştiyse güncelle
+                        setMessages(prev => {
+                            if (prev.length !== msgs.length) {
+                                console.log('🗑️ Mesaj sayısı değişti, güncelleniyor. Yeni:', msgs.length);
+                                return msgs;
+                            }
+                            return prev;
+                        });
+
+                        // Auto-close check
+                        if (hasLoadedMessages.current && msgs.length === 0) {
+                            console.log('📴 (Global DELETE) Tüm mesajlar silindi, ChatScreen kapanıyor');
+                            setTimeout(() => {
+                                // Sadece ekran hala odaktaysa ve geri gidilebiliyorsa git
+                                if (navigation.isFocused() && navigation.canGoBack()) {
+                                    navigation.goBack();
+                                } else {
+                                    console.log('⚠️ ChatScreen zaten kapalı veya geri gidilemiyor');
+                                }
+                            }, 500);
+                        }
+                    });
                 }
             )
             .subscribe();
@@ -153,6 +253,16 @@ export function ChatScreen() {
             supabase.removeChannel(channel);
         };
     }, [conversationId]);
+
+    // Mesajlar yüklendiğinde flag'i set et
+    useEffect(() => {
+        if (messages.length > 0 && !isLoading) {
+            if (!hasLoadedMessages.current) {
+                console.log('✅ hasLoadedMessages flag set edildi');
+                hasLoadedMessages.current = true;
+            }
+        }
+    }, [messages.length, isLoading]);
 
     // Mesaj gönder
     const handleSend = async () => {

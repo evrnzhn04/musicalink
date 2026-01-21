@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { Image, Keyboard, KeyboardAvoidingView, Modal, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
+import { Image, Keyboard, KeyboardAvoidingView, Modal, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View, Alert } from "react-native";
 import { useAuth } from "../../contexts/AuthContext";
-import { launchImageLibrary } from "react-native-image-picker";
+import ImageCropPicker from "react-native-image-crop-picker";
 import { checkUserNameAvailable, updateProfile, uploadAvatar } from "../../services/profileService";
 import { COLORS, FONT_SIZES, SPACING } from "../../utils/constants";
 import CancelIcon from 'react-native-vector-icons/Ionicons';
@@ -42,12 +42,24 @@ export function EditProfileScreen({ visible, onClose }: EditProfileScreenProps) 
     }, [visible, user]);
 
     const pickImage = async () => {
-        const result = await launchImageLibrary({
-            mediaType: 'photo',
-            quality: 0.8,
-        });
-        if (result.assets?.[0]?.uri) {
-            setAvatarUri(result.assets[0].uri);
+        try {
+            const image = await ImageCropPicker.openPicker({
+                width: 400,
+                height: 400,
+                cropping: true,
+                cropperCircleOverlay: true, // Daire şeklinde kırpma
+                mediaType: 'photo',
+                compressImageQuality: 0.8,
+                cropperToolbarTitle: 'Fotoğrafı Ayarla',
+                cropperChooseText: 'Seç',
+                cropperCancelText: 'İptal',
+            });
+            setAvatarUri(image.path);
+        } catch (error: any) {
+            if (error.code !== 'E_PICKER_CANCELLED') {
+                console.error('Image picker error:', error);
+                Alert.alert('Hata', 'Fotoğraf seçilirken bir hata oluştu.');
+            }
         }
     };
 
@@ -131,12 +143,15 @@ export function EditProfileScreen({ visible, onClose }: EditProfileScreenProps) 
                                 {/**Photo Area */}
                                 <View style={styles.photoArea}>
                                     <View>
-                                        {user?.avatar_url ? (<Image source={{ uri: user?.avatar_url }} style={styles.profilePhoto} />)
-                                            : (<DefaultProfilePhoto />)}
+                                        {(avatarUri || user?.avatar_url) ? (
+                                            <Image source={{ uri: (avatarUri || user?.avatar_url) as string }} style={styles.profilePhoto} />
+                                        ) : (
+                                            <DefaultProfilePhoto />
+                                        )}
                                         <TouchableOpacity onPress={pickImage}
-                                            style={{ position: 'absolute', right: 0, bottom: 0, zIndex: 10 }}
+                                            style={styles.cameraButton}
                                         >
-                                            <PhotoIcon name="photo-camera" size={28} color={COLORS.text} />
+                                            <PhotoIcon name="photo-camera" size={24} color="#FFF" />
                                         </TouchableOpacity>
                                     </View>
                                 </View>
@@ -262,5 +277,14 @@ const styles = StyleSheet.create({
         backgroundColor: COLORS.primary, marginTop: 40,
         paddingVertical: 10, paddingHorizontal: 60,
         borderRadius: 20
+    },
+    cameraButton: {
+        position: 'absolute',
+        right: 0,
+        bottom: 0,
+        backgroundColor: COLORS.primary,
+        borderRadius: 20,
+        padding: 8,
+        zIndex: 10,
     }
 });

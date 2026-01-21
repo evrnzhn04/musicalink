@@ -75,3 +75,41 @@ export async function getFollowStatus(myId: string, targetId: string): Promise<'
 
     return data ? 'following' : 'none';
 }
+
+// Takipçileri getir (beni takip edenler)
+export async function getFollowers(userId: string): Promise<any[]> {
+    const { data, error } = await supabase
+        .from('friendships')
+        .select(`
+            requester_id,
+            profiles!friendships_requester_id_fkey(id, username, display_name, avatar_url)
+        `)
+        .eq('receiver_id', userId)
+        .eq('status', 'accepted');
+
+    if (error) {
+        console.error('getFollowers error:', error);
+        return [];
+    }
+
+    return data?.map((item: any) => item.profiles) || [];
+}
+
+// Takip edilenleri getir (benim takip ettiklerim)
+export async function getFollowing(userId: string): Promise<any[]> {
+    const { data, error } = await supabase
+        .from('friendships')
+        .select(`
+            receiver_id,
+            profiles!friendships_receiver_id_fkey(id, username, display_name, avatar_url)
+        `)
+        .eq('requester_id', userId)
+        .eq('status', 'accepted');
+
+    if (error) {
+        console.error('getFollowing error:', error);
+        return [];
+    }
+
+    return data?.map((item: any) => item.profiles) || [];
+}

@@ -3,6 +3,8 @@ import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, FlatList, 
 import { COLORS, FONT_SIZES, SPACING } from '../../utils/constants';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { DefaultProfilePhoto } from '../../components/profile/DefaultProfilePhoto';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/Entypo';
@@ -15,9 +17,15 @@ import { SongActionSheet } from '../../components/profile/SongActionSheet';
 import { EditProfileScreen } from '../../components/profile/EditProfileScreen';
 import { getFollowerCount, getFollowingCount } from '../../services/followService';
 
+type RootStackParamList = {
+    Followers: { userId: string };
+    Following: { userId: string };
+};
+
 export function ProfileScreen() {
     const { logout, user } = useAuth();
     const insets = useSafeAreaInsets();
+    const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
     const [profileSongs, setProfileSongs] = useState<ProfileSong[]>([]);
     const [topArtists, setTopArtists] = useState<TopArtist[]>([]);
     const [isSongModalVisible, setIsSongModalVisible] = useState(false);
@@ -125,15 +133,23 @@ export function ProfileScreen() {
 
                         {/**Friendship Area */}
                         <View style={styles.friendshipArea}>
-                            <View style={{ justifyContent: 'center', alignItems: 'center', gap: 5 }}>
+                            <TouchableOpacity
+                                style={{ justifyContent: 'center', alignItems: 'center', gap: 5 }}
+                                onPress={() => user?.id && navigation.navigate('Following', { userId: user.id })}
+                                activeOpacity={0.7}
+                            >
                                 <Text style={{ fontWeight: 'bold', color: COLORS.text, fontSize: 18 }}>{followingCount}</Text>
                                 <Text style={{ fontWeight: 'bold', color: COLORS.textSecondary }}>TAKİP</Text>
-                            </View>
+                            </TouchableOpacity>
                             <View style={{ height: 30, width: 1, backgroundColor: COLORS.textSecondary }} />
-                            <View style={{ justifyContent: 'center', alignItems: 'center', gap: 5 }}>
+                            <TouchableOpacity
+                                style={{ justifyContent: 'center', alignItems: 'center', gap: 5 }}
+                                onPress={() => user?.id && navigation.navigate('Followers', { userId: user.id })}
+                                activeOpacity={0.7}
+                            >
                                 <Text style={{ fontWeight: 'bold', color: COLORS.text, fontSize: 18 }}>{followerCount}</Text>
                                 <Text style={{ fontWeight: 'bold', color: COLORS.textSecondary }}>TAKİPÇİ</Text>
-                            </View>
+                            </TouchableOpacity>
                         </View>
 
                         {/**Edit Area */}

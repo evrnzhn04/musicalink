@@ -6,6 +6,7 @@ import { SpotifyUser } from '../types/auth.types';
 import { getSpotifyProfile } from '../services/spotifyService';
 import { DefaultProfilePhoto } from '../components/profile/DefaultProfilePhoto';
 import { CurrentTrackArea } from '../components/music/CurrentTrackArea';
+import { testLocalNotification } from '../services/notificationService';
 
 export function HomeScreen() {
     const { logout, user } = useAuth();

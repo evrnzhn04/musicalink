@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
+
+export const navigationRef = createNavigationContainerRef();
 
 import { useAuth } from '../contexts/AuthContext';
 import { LoginScreen } from '../screens/auth/LoginScreen';
@@ -15,7 +17,9 @@ import { ProfileScreen } from '../screens/profile/ProfileScreen';
 import { OtherProfileScreen } from '../screens/profile/OtherProfileScreen';
 import { COLORS } from '../utils/constants';
 import { SearchScreen } from '../screens/search/SearchScreen';
-import { getTotalUnreadCount, subscribeToUnreadCount } from '../services/messageService';
+import { getUniqueSenderCount, subscribeToUnreadCount } from '../services/messageService';
+import { FollowersScreen } from '../screens/friends/FollowersScreen';
+import { FollowingScreen } from '../screens/friends/FollowingScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -30,7 +34,7 @@ function MainTabs() {
 
         // İlk yükleme
         const loadUnread = async () => {
-            const count = await getTotalUnreadCount(user.id);
+            const count = await getUniqueSenderCount(user.id);
             setUnreadCount(count);
         };
         loadUnread();
@@ -110,6 +114,8 @@ function MainStack() {
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen name="OtherProfile" component={OtherProfileScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
+            <Stack.Screen name="Followers" component={FollowersScreen} />
+            <Stack.Screen name="Following" component={FollowingScreen} />
         </Stack.Navigator>
     );
 }
@@ -126,7 +132,7 @@ export function AppNavigator() {
     }
 
     return (
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
             {!isAuthenticated ? (
                 <LoginScreen />
             ) : !hasProfile ? (

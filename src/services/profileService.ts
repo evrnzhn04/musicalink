@@ -1,21 +1,38 @@
 import { supabase } from "../api/supabase";
 import { UserProfile } from "../types/auth.types";
 import { ProfileSong } from "../types/spotify.types";
+import RNFS from 'react-native-fs';
+import { decode } from 'base64-arraybuffer';
 
 export async function uploadAvatar(userId: string, localUri: string): Promise<string | null> {
     try {
-        const response = await fetch(localUri);
-        const blob = await response.blob();
-
-        const extension = localUri.split('.').pop() || 'jpg';
-        const fileName = `${userId}.${extension}`;
-
-        //Supabase Storage upload
-        const { data, error } = await supabase.storage
+        // 1. Önce eski avatarları temizle (userId ile başlayan tüm dosyaları sil)
+        const { data: listData } = await supabase.storage
             .from('avatars')
-            .upload(fileName, blob, {
+            .list('', { search: userId });
+
+        if (listData && listData.length > 0) {
+            const filesToRemove = listData.map(x => x.name);
+            await supabase.storage
+                .from('avatars')
+                .remove(filesToRemove);
+        }
+
+        // 2. Yeni dosya adı oluştur
+        const extension = localUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const fileName = `${userId}_${Date.now()}.${extension}`; // Timestamp ekleyerek benzersiz yap
+        const contentType = extension === 'png' ? 'image/png' : 'image/jpeg';
+
+        // 3. Dosyayı base64 olarak oku
+        const base64Data = await RNFS.readFile(localUri, 'base64');
+        const arrayBuffer = decode(base64Data);
+
+        // 4. Supabase Storage upload
+        const { error } = await supabase.storage
+            .from('avatars')
+            .upload(fileName, arrayBuffer, {
                 upsert: true,
-                contentType: `image/${extension}`,
+                contentType: contentType,
             });
 
         if (error) {
@@ -23,12 +40,13 @@ export async function uploadAvatar(userId: string, localUri: string): Promise<st
             return null;
         }
 
-        //Public URL al
+        // 5. Public URL al
         const { data: urlData } = supabase.storage
             .from('avatars')
             .getPublicUrl(fileName);
 
-        return urlData.publicUrl;
+        // URL'ye timestamp ekle ki cache'e takılmasın
+        return `${urlData.publicUrl}?t=${Date.now()}`;
     } catch (error) {
         console.error('Avatar upload error: ', error);
         return null;

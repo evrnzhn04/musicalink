@@ -12,6 +12,7 @@ export interface Message {
     is_read: boolean;
     read_at: string | null;
     created_at: string;
+    hidden_for?: string[]; // Mesajı gizleyen kullanıcı ID'leri
 }
 
 export interface ConversationPreview {
@@ -70,7 +71,7 @@ export async function sendMessage(
 /**
  * Konuşmadaki mesajları getir
  */
-export async function getMessages(conversationId: string, limit: number = 50): Promise<Message[]> {
+export async function getMessages(conversationId: string, userId?: string, limit: number = 50): Promise<Message[]> {
     const { data, error } = await supabase
         .from('messages')
         .select('*')
@@ -81,6 +82,11 @@ export async function getMessages(conversationId: string, limit: number = 50): P
     if (error) {
         console.error('getMessages error:', error);
         return [];
+    }
+
+    // Gizli mesajları filtrele (eğer userId verilmişse)
+    if (userId) {
+        return (data || []).filter(msg => !msg.hidden_for || !msg.hidden_for.includes(userId));
     }
 
     return data || [];
@@ -102,7 +108,7 @@ export async function getConversations(userId: string): Promise<ConversationPrev
         return [];
     }
 
-    // Conversation'ları grupla
+    // Conversation'ları grupla ve gizli mesajları filtrele
     const conversationMap = new Map<string, Message[]>();
     messages.forEach(msg => {
         const existing = conversationMap.get(msg.conversation_id) || [];
@@ -114,7 +120,16 @@ export async function getConversations(userId: string): Promise<ConversationPrev
     const conversations: ConversationPreview[] = [];
     
     for (const [convId, msgs] of conversationMap) {
+        if (msgs.length === 0) continue;
+
         const lastMsg = msgs[0]; // En son mesaj (desc sıralı)
+        
+        // KRITIK: Eğer en son mesaj bu kullanıcı için gizliyse, conversation'ı gösterme!
+        if (lastMsg.hidden_for && lastMsg.hidden_for.includes(userId)) {
+            console.log(`🚫 Conversation ${convId} gizlendi (son mesaj hidden)`);
+            continue;
+        }
+
         const otherUserId = lastMsg.sender_id === userId ? lastMsg.receiver_id : lastMsg.sender_id;
         
         // Diğer kullanıcının profilini al
@@ -125,8 +140,15 @@ export async function getConversations(userId: string): Promise<ConversationPrev
             .single();
 
         if (profile) {
-            // Okunmamış mesaj sayısı (karşı taraftan gelen)
-            const unreadCount = msgs.filter(m => m.receiver_id === userId && !m.is_read).length;
+            // Sadece gizli olmayanları say
+            const visibleMessages = msgs.filter(m => 
+                !m.hidden_for || !m.hidden_for.includes(userId)
+            );
+
+            // Okunmamış mesaj sayısı
+            const unreadCount = visibleMessages.filter(m => 
+                m.receiver_id === userId && !m.is_read
+            ).length;
 
             conversations.push({
                 id: convId,
@@ -158,6 +180,71 @@ export async function markMessagesAsRead(conversationId: string, receiverId: str
     if (error) {
         console.error('markMessagesAsRead error:', error);
         return false;
+    }
+
+    return true;
+}
+
+/**
+ * Sohbeti sil
+ * @param conversationId - Conversation ID
+ * @param deleteForBoth - true: her iki kullanıcıdan da sil (DELETE), false: sadece benim hesabımdan gizle (UPDATE hidden_for)
+ * @param userId - Kullanıcı ID
+ */
+export async function deleteConversation(
+    conversationId: string,
+    deleteForBoth: boolean = true,
+    userId?: string
+): Promise<boolean> {
+    if (deleteForBoth) {
+        // İki kullanıcı için de tamamen sil
+        const { error } = await supabase
+            .from('messages')
+            .delete()
+            .eq('conversation_id', conversationId);
+
+        if (error) {
+            console.error('deleteConversation (both) error:', error);
+            return false;
+        }
+    } else {
+        // Sadece bu kullanıcı için gizle
+        if (!userId) {
+            console.error('deleteConversation: userId required when deleteForBoth=false');
+            return false;
+        }
+
+        // hidden_for array'ine userId ekle
+        const { data: existingMessages } = await supabase
+            .from('messages')
+            .select('id, hidden_for')
+            .eq('conversation_id', conversationId);
+
+        if (!existingMessages) return false;
+
+        console.log(`📝 ${existingMessages.length} mesaj bulundu, hidden_for güncelleniyor...`);
+
+        // Her mesaj için hidden_for'u güncelle
+        for (const msg of existingMessages) {
+            const hiddenFor = msg.hidden_for || [];
+            if (!hiddenFor.includes(userId)) {
+                hiddenFor.push(userId);
+                
+                console.log(`🔒 Mesaj ${msg.id} için hidden_for güncelleniyor:`, hiddenFor);
+                
+                const { error } = await supabase
+                    .from('messages')
+                    .update({ hidden_for: hiddenFor })
+                    .eq('id', msg.id);
+
+                if (error) {
+                    console.error('Update hidden_for error:', error);
+                    return false;
+                }
+            }
+        }
+
+        console.log('✅ Tüm mesajlar hidden_for ile güncellendi');
     }
 
     return true;
@@ -210,6 +297,26 @@ export async function getTotalUnreadCount(userId: string): Promise<number> {
 }
 
 /**
+ * Okunmamış mesaj gönderen benzersiz kişi sayısını getir
+ */
+export async function getUniqueSenderCount(userId: string): Promise<number> {
+    const { data, error } = await supabase
+        .from('messages')
+        .select('sender_id')
+        .eq('receiver_id', userId)
+        .eq('is_read', false);
+
+    if (error) {
+        console.error('getUniqueSenderCount error:', error);
+        return 0;
+    }
+
+    // Benzersiz sender_id sayısını hesapla
+    const uniqueSenders = new Set(data?.map(m => m.sender_id) || []);
+    return uniqueSenders.size;
+}
+
+/**
  * Okunmamış mesaj sayısı için realtime subscription
  */
 export function subscribeToUnreadCount(
@@ -227,8 +334,8 @@ export function subscribeToUnreadCount(
                 filter: `receiver_id=eq.${userId}`
             },
             async () => {
-                // Yeni mesaj geldiğinde veya okundu işaretlendiğinde sayıyı güncelle
-                const count = await getTotalUnreadCount(userId);
+                // Yeni mesaj geldiğinde veya okundu işaretlendiğinde benzersiz gönderici sayısını güncelle
+                const count = await getUniqueSenderCount(userId);
                 onUpdate(count);
             }
         )

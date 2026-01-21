@@ -6,6 +6,7 @@ import EncryptedStorage from "react-native-encrypted-storage";
 import { getSpotifyProfile, getTopArtists } from "../services/spotifyService";
 import { getProfileBySupabaseId, syncTopArtists } from "../services/profileService";
 import { updatePresence } from "../services/presenceService";
+import { setupNotificationService } from "../services/notificationService";
 
 interface AuthContextType extends AuthState {
     login: () => Promise<void>;
@@ -64,6 +65,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                         hasProfile: !!existingProfile,
                         user: existingProfile,
                     }));
+
+                    // Bildirim servisini başlat
+                    if (supabaseId) {
+                        setTimeout(() => {
+                            setupNotificationService(supabaseId).catch(err =>
+                                console.error('Notification setup error:', err)
+                            );
+                        }, 1000); // Login akışı tamamlandıktan sonra
+                    }
                 } else {
                     setState(prev => ({ ...prev, isLoading: false }));
                 }
@@ -143,6 +153,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                             if (topArtists.length > 0) {
                                 await syncTopArtists(existingProfile.id, topArtists);
                             }
+
+                            // ✅ Bildirim servisini başlat (App restart durumu için)
+                            setupNotificationService(existingProfile.id).catch(err =>
+                                console.error('Notification setup error (checkAuth):', err)
+                            );
                         }
                     } else {
                         setState(prev => ({ ...prev, isLoading: false }));

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "836185363841",
+    "project_id": "musicalink-evren",
+    "storage_bucket": "musicalink-evren.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:836185363841:android:723e1bbcaa224b7fe0c480",
+        "android_client_info": {
+          "package_name": "com.musicalink"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAkrgU0AUQpmmDJGXMpyUjWFPpFAT-Er-A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
