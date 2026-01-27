@@ -31,6 +31,8 @@ import { supabase } from '../../api/supabase';
 import { getPresence, subscribeToPresence, formatLastSeen } from '../../services/presenceService';
 import { AttachmentModal } from '../../components/chat/AttachmentModal';
 import { SongSearchModal } from '../../components/profile/SongSearchModal';
+import { SpotifyPlayModal } from '../../components/chat/SpotifyPlayModal';
+import { playTrack } from '../../services/spotifyService';
 
 type ChatRouteParams = {
     Chat: {
@@ -48,14 +50,17 @@ export function ChatScreen() {
     const route = useRoute<RouteProp<ChatRouteParams, 'Chat'>>();
     const { otherUser } = route.params;
 
-    const { user } = useAuth();
+    const { user, spotifyUser } = useAuth();
     const insets = useSafeAreaInsets();
     const flashListRef = useRef<any>(null);
     const hasLoadedMessages = useRef(false);
     const appState = useRef<AppStateStatus>(AppState.currentState);
+    const isNearBottom = useRef(true); // Kullanıcı en altta mı?
 
     const [attachmentModalVisible, setAttachmentModalVisible] = useState(false);
     const [songModalVisible, setSongModalVisible] = useState(false);
+    const [spotifyPlayModalVisible, setSpotifyPlayModalVisible] = useState(false);
+    const [selectedTrackForPlay, setSelectedTrackForPlay] = useState<{ name: string; artist: string; image: string; uri: string } | null>(null);
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputText, setInputText] = useState('');
@@ -103,9 +108,9 @@ export function ChatScreen() {
             if (user?.id) {
                 if (AppState.currentState === 'active') {
                     await markMessagesAsRead(conversationId, user.id);
-                    console.log('✅ Mesajlar okundu işaretlendi (app active)');
+                    //console.log('✅ Mesajlar okundu işaretlendi (app active)');
                 } else {
-                    console.log('⏸️ App background, mesajlar okundu işaretlenmedi');
+                    //console.log('⏸️ App background, mesajlar okundu işaretlenmedi');
                 }
             }
 
@@ -159,9 +164,9 @@ export function ChatScreen() {
                 // SADECE app foreground'daysa okundu işaretle
                 if (AppState.currentState === 'active') {
                     markMessagesAsRead(conversationId, user.id);
-                    console.log('✅ Yeni mesaj okundu işaretlendi (app active)');
+                    //console.log('✅ Yeni mesaj okundu işaretlendi (app active)');
                 } else {
-                    console.log('⏸️ Yeni mesaj geldi ama app background, okundu işaretlenmedi');
+                    //console.log('⏸️ Yeni mesaj geldi ama app background, okundu işaretlenmedi');
                 }
             }
         });
@@ -191,13 +196,13 @@ export function ChatScreen() {
 
                     // hidden_for güncellemesi için de kontrol et
                     if (user?.id && updated.hidden_for?.includes(user.id)) {
-                        console.log('🔒 Mesaj gizlendi, listeyi yeniden yükle');
+                        //console.log('🔒 Mesaj gizlendi, listeyi yeniden yükle');
                         getMessages(conversationId, user?.id).then(msgs => {
-                            console.log('📬 UPDATE sonrası mesaj sayısı:', msgs.length);
+                            //console.log('📬 UPDATE sonrası mesaj sayısı:', msgs.length);
                             setMessages(msgs);
 
                             if (hasLoadedMessages.current && msgs.length === 0) {
-                                console.log('📴 Tüm mesajlar gizlendi, ChatScreen kapanıyor');
+                                //console.log('📴 Tüm mesajlar gizlendi, ChatScreen kapanıyor');
                                 setTimeout(() => {
                                     (navigation as any).goBack();
                                 }, 500);
@@ -217,7 +222,7 @@ export function ChatScreen() {
                 },
                 (payload) => {
                     const deletedId = payload.old?.id;
-                    console.log('🗑️ DELETE event alındı wait filter:', deletedId);
+                    //console.log('🗑️ DELETE event alındı wait filter:', deletedId);
 
                     // Silinen mesaj bu sohbette mi? (State'deki mesajlardan kontrol et)
                     // Not: messages state'ine closure içinde erişemeyebiliriz, getMessages ile kontrol daha sağlıklı
@@ -230,7 +235,7 @@ export function ChatScreen() {
                         // Eğer mesaj sayısı değiştiyse güncelle
                         setMessages(prev => {
                             if (prev.length !== msgs.length) {
-                                console.log('🗑️ Mesaj sayısı değişti, güncelleniyor. Yeni:', msgs.length);
+                                //console.log('🗑️ Mesaj sayısı değişti, güncelleniyor. Yeni:', msgs.length);
                                 return msgs;
                             }
                             return prev;
@@ -238,13 +243,13 @@ export function ChatScreen() {
 
                         // Auto-close check
                         if (hasLoadedMessages.current && msgs.length === 0) {
-                            console.log('📴 (Global DELETE) Tüm mesajlar silindi, ChatScreen kapanıyor');
+                            //console.log('📴 (Global DELETE) Tüm mesajlar silindi, ChatScreen kapanıyor');
                             setTimeout(() => {
                                 // Sadece ekran hala odaktaysa ve geri gidilebiliyorsa git
                                 if (navigation.isFocused() && navigation.canGoBack()) {
                                     navigation.goBack();
                                 } else {
-                                    console.log('⚠️ ChatScreen zaten kapalı veya geri gidilemiyor');
+                                    //console.log('⚠️ ChatScreen zaten kapalı veya geri gidilemiyor');
                                 }
                             }, 500);
                         }
@@ -262,7 +267,7 @@ export function ChatScreen() {
     useEffect(() => {
         if (messages.length > 0 && !isLoading) {
             if (!hasLoadedMessages.current) {
-                console.log('✅ hasLoadedMessages flag set edildi');
+                //console.log('✅ hasLoadedMessages flag set edildi');
                 hasLoadedMessages.current = true;
             }
         }
@@ -405,7 +410,12 @@ export function ChatScreen() {
 
                         <TouchableOpacity
                             style={styles.trackMessageContainer}
-                            onPress={() => openSpotifyTrack(item.track_data.uri)}
+                            onPress={() => openSpotifyTrack({
+                                name: item.track_data.name,
+                                artist: item.track_data.artist,
+                                image: item.track_data.image,
+                                uri: item.track_data.uri
+                            })}
                             activeOpacity={0.7}
                         >
                             <Image
@@ -529,20 +539,42 @@ export function ChatScreen() {
         );
     }, [messages, user?.id, otherUser.avatar_url]);
 
-    // Spotify'da şarkı aç
-    const openSpotifyTrack = async (uri: string) => {
-        try {
-            const canOpen = await Linking.canOpenURL(uri);
-            if (canOpen) {
-                await Linking.openURL(uri);
-            } else {
-                // Spotify yüklü değilse web'de aç
-                const trackId = uri.split(':')[2];
-                await Linking.openURL(`https://open.spotify.com/track/${trackId}`);
-            }
-        } catch (error) {
-            console.error('Spotify açma hatası:', error);
+    // Spotify'da şarkı aç (Web API ile)
+    const openSpotifyTrack = async (trackData: { name: string; artist: string; image: string; uri: string }) => {
+        // Web API ile şarkı çalmayı dene
+        const result = await playTrack(trackData.uri);
+
+        switch (result) {
+            case 'success':
+                // Başarılı - şarkı arka planda çalıyor
+                //console.log('Şarkı başarıyla çalındı:', trackData.name);
+                break;
+            case 'not_premium':
+                // Premium değil - modal göster
+                setSelectedTrackForPlay(trackData);
+                setSpotifyPlayModalVisible(true);
+                break;
+            case 'no_device':
+                // Aktif cihaz yok - Spotify'ı aç
+                //console.log('Aktif cihaz yok, Spotify açılıyor');
+                await Linking.openURL(trackData.uri);
+                break;
+            case 'error':
+            default:
+                // Genel hata - Spotify'ı aç
+                //console.log('API hatası, Spotify açılıyor');
+                await Linking.openURL(trackData.uri);
+                break;
         }
+    };
+
+    // Karışık çalmaya devam et (Spotify'ı aç)
+    const handleShufflePlay = async () => {
+        if (selectedTrackForPlay) {
+            await Linking.openURL(selectedTrackForPlay.uri);
+        }
+        setSpotifyPlayModalVisible(false);
+        setSelectedTrackForPlay(null);
     };
 
     // Presence durumuna göre status text
@@ -590,8 +622,15 @@ export function ChatScreen() {
                     drawDistance={250}
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 20 }}
+                    onScroll={(event) => {
+                        const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+                        const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+                        // Eğer en alttan 100px içindeyse "yakın" sayılır
+                        isNearBottom.current = distanceFromBottom < 100;
+                    }}
                     onContentSizeChange={() => {
-                        if (messages.length > 0) {
+                        // Sadece kullanıcı en alttayken veya ilk yüklemede scroll et
+                        if (messages.length > 0 && isNearBottom.current) {
                             flashListRef.current?.scrollToEnd({ animated: true });
                         }
                     }}
@@ -641,11 +680,11 @@ export function ChatScreen() {
                 }}
                 onGalleryPress={() => {
                     setAttachmentModalVisible(false);
-                    console.log('Galeri özelliği henüz hazır değil');
+                    //console.log('Galeri özelliği henüz hazır değil');
                 }}
                 onCameraPress={() => {
                     setAttachmentModalVisible(false);
-                    console.log('Kamera özelliği henüz hazır değil');
+                    //console.log('Kamera özelliği henüz hazır değil');
                 }}
             />
 
@@ -681,6 +720,17 @@ export function ChatScreen() {
                     }
                     setIsSending(false);
                 }}
+            />
+
+            {/* Spotify Play Modal - Premium değilse göster */}
+            <SpotifyPlayModal
+                visible={spotifyPlayModalVisible}
+                onClose={() => {
+                    setSpotifyPlayModalVisible(false);
+                    setSelectedTrackForPlay(null);
+                }}
+                onShufflePlay={handleShufflePlay}
+                trackData={selectedTrackForPlay || undefined}
             />
         </KeyboardAvoidingView>
     );

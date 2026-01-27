@@ -13,7 +13,7 @@ export async function getSpotifyProfile() {
             isPremium: data.product === 'premium',
         }
     } catch (error) {
-        console.log('Error: ', error);
+        //console.log('Error: ', error);
         return null;
     }
 }
@@ -37,7 +37,7 @@ export async function searchTracks(query: string): Promise<ProfileSong[]> {
             album_image_url: item.album.images[0]?.url || ''
         }))
     } catch (error) {
-        console.error('Search error: ', error);
+        //console.error('Search error: ', error);
         return [];
     }
 }
@@ -57,7 +57,7 @@ export async function getTopArtists(limit: number = 5): Promise<TopArtist[]> {
             imageUrl: item.images[0]?.url || ''
         }));
     } catch (error) {
-        console.error('Top artists error: ', error);
+        //console.error('Top artists error: ', error);
         return [];
     }
 }
@@ -85,7 +85,7 @@ export async function getCurrentlyPlaying(): Promise<CurrentTrack | null> {
             durationMs: data.item.duration_ms,
         }
     } catch (error) {
-        console.error('Currently playing error:', error);
+        //console.error('Currently playing error:', error);
         return null;
     }
 }
@@ -95,7 +95,7 @@ export async function pausePlayback(): Promise<boolean> {
         await spotifyApi.put('/me/player/pause');
         return true;
     } catch (error) {
-        console.error('Pause error:', error);
+        //console.error('Pause error:', error);
         return false;
     }
 }
@@ -105,7 +105,7 @@ export async function resumePlayback(): Promise<boolean> {
         await spotifyApi.put('/me/player/play');
         return true;
     } catch (error) {
-        console.error('Resume error:', error);
+        //console.error('Resume error:', error);
         return false;
     }
 }
@@ -115,7 +115,7 @@ export async function skipToNext(): Promise<boolean> {
         await spotifyApi.post('/me/player/next');
         return true;
     } catch (error) {
-        console.error('Skip next error:', error);
+        //console.error('Skip next error:', error);
         return false;
     }
 }
@@ -125,7 +125,36 @@ export async function skipToPrevious(): Promise<boolean> {
         await spotifyApi.post('/me/player/previous');
         return true;
     } catch (error) {
-        console.error('Skip previous error:', error);
+        //console.error('Skip previous error:', error);
         return false;
+    }
+}
+
+/**
+ * Belirli bir şarkıyı çal
+ * @param trackUri - Spotify track URI (spotify:track:xxxxx)
+ * @returns 'success' | 'not_premium' | 'no_device' | 'error'
+ */
+export async function playTrack(trackUri: string): Promise<'success' | 'not_premium' | 'no_device' | 'error'> {
+    try {
+        await spotifyApi.put('/me/player/play', {
+            uris: [trackUri]
+        });
+        return 'success';
+    } catch (error: any) {
+        const status = error?.response?.status;
+        const reason = error?.response?.data?.error?.reason;
+        
+        //console.error('Play track error:', status, reason, error?.response?.data);
+        
+        if (status === 403) {
+            // Premium gerekli
+            return 'not_premium';
+        }
+        if (status === 404 || reason === 'NO_ACTIVE_DEVICE') {
+            // Aktif cihaz yok
+            return 'no_device';
+        }
+        return 'error';
     }
 }
