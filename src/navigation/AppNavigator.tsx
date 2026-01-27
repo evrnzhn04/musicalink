@@ -20,6 +20,7 @@ import { SearchScreen } from '../screens/search/SearchScreen';
 import { getUniqueSenderCount, subscribeToUnreadCount } from '../services/messageService';
 import { FollowersScreen } from '../screens/friends/FollowersScreen';
 import { FollowingScreen } from '../screens/friends/FollowingScreen';
+import { ChatInfoScreen } from '../screens/chat/ChatInfoScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -114,6 +115,7 @@ function MainStack() {
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen name="OtherProfile" component={OtherProfileScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
+            <Stack.Screen name="ChatInfo" component={ChatInfoScreen} />
             <Stack.Screen name="Followers" component={FollowersScreen} />
             <Stack.Screen name="Following" component={FollowingScreen} />
         </Stack.Navigator>

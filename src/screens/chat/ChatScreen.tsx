@@ -9,7 +9,8 @@ import {
     Platform,
     Image,
     AppState,
-    AppStateStatus
+    AppStateStatus,
+    Linking
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +29,8 @@ import {
 import { DefaultProfilePhoto } from '../../components/profile/DefaultProfilePhoto';
 import { supabase } from '../../api/supabase';
 import { getPresence, subscribeToPresence, formatLastSeen } from '../../services/presenceService';
+import { AttachmentModal } from '../../components/chat/AttachmentModal';
+import { SongSearchModal } from '../../components/profile/SongSearchModal';
 
 type ChatRouteParams = {
     Chat: {
@@ -51,7 +54,8 @@ export function ChatScreen() {
     const hasLoadedMessages = useRef(false);
     const appState = useRef<AppStateStatus>(AppState.currentState);
 
-
+    const [attachmentModalVisible, setAttachmentModalVisible] = useState(false);
+    const [songModalVisible, setSongModalVisible] = useState(false);
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputText, setInputText] = useState('');
@@ -365,6 +369,85 @@ export function ChatScreen() {
             }
         }
 
+        // Şarkı mesajı
+        if (item.message_type === 'track' && item.track_data) {
+            return (
+                <View style={{ marginBottom: showTime ? 12 : 4 }}>
+                    {/* Tarih Ayıracı */}
+                    {showDateSeparator && (
+                        <View style={styles.dateSeparator}>
+                            <View style={styles.dateBadge}>
+                                <Text style={styles.dateBadgeText}>
+                                    {formatRelativeDate(item.created_at)}
+                                </Text>
+                            </View>
+                        </View>
+                    )}
+
+                    <View style={[
+                        styles.messageRow,
+                        isMe ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' }
+                    ]}>
+                        {/* Diğer kullanıcının avatarı */}
+                        {!isMe && (
+                            <View style={styles.avatarContainer}>
+                                {showAvatar ? (
+                                    otherUser.avatar_url ? (
+                                        <Image source={{ uri: otherUser.avatar_url }} style={styles.messageAvatar} />
+                                    ) : (
+                                        <DefaultProfilePhoto size={28} />
+                                    )
+                                ) : (
+                                    <View style={styles.avatarPlaceholder} />
+                                )}
+                            </View>
+                        )}
+
+                        <TouchableOpacity
+                            style={styles.trackMessageContainer}
+                            onPress={() => openSpotifyTrack(item.track_data.uri)}
+                            activeOpacity={0.7}
+                        >
+                            <Image
+                                source={{ uri: item.track_data.image }}
+                                style={styles.trackImage}
+                            />
+                            <View style={styles.trackInfo}>
+                                <Text style={styles.trackName} numberOfLines={1}>
+                                    {item.track_data.name}
+                                </Text>
+                                <Text style={styles.trackArtist} numberOfLines={1}>
+                                    {item.track_data.artist}
+                                </Text>
+                            </View>
+                            <Icon name="play-circle" size={50} color={COLORS.primary} />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Saat ve Görüldü - sadece grubun sonunda göster */}
+                    {showTime && (
+                        <View style={[
+                            styles.messageFooter,
+                            isMe ? { alignSelf: 'flex-end', marginRight: 8 } : { alignSelf: 'flex-start', marginLeft: 8 }
+                        ]}>
+                            <Text style={styles.messageTime}>
+                                {new Date(item.created_at).toLocaleTimeString('tr-TR', {
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                })}
+                            </Text>
+                            {isMe && item.is_read && (
+                                <View style={styles.readIndicator}>
+                                    <Text style={styles.readText}>Görüldü</Text>
+                                    <Icon name="checkmark-done" size={14} color="#1DB954" />
+                                </View>
+                            )}
+                        </View>
+                    )}
+                </View>
+            );
+        }
+
         return (
             <>
                 {/* Tarih Ayıracı */}
@@ -446,6 +529,22 @@ export function ChatScreen() {
         );
     }, [messages, user?.id, otherUser.avatar_url]);
 
+    // Spotify'da şarkı aç
+    const openSpotifyTrack = async (uri: string) => {
+        try {
+            const canOpen = await Linking.canOpenURL(uri);
+            if (canOpen) {
+                await Linking.openURL(uri);
+            } else {
+                // Spotify yüklü değilse web'de aç
+                const trackId = uri.split(':')[2];
+                await Linking.openURL(`https://open.spotify.com/track/${trackId}`);
+            }
+        } catch (error) {
+            console.error('Spotify açma hatası:', error);
+        }
+    };
+
     // Presence durumuna göre status text
     const statusText = isOtherUserOnline ? 'Çevrimiçi' : formatLastSeen(otherUserLastSeen);
     const statusColor = isOtherUserOnline ? '#1DB954' : COLORS.textSecondary;
@@ -476,7 +575,7 @@ export function ChatScreen() {
                     </View>
                 </View>
 
-                <TouchableOpacity>
+                <TouchableOpacity onPress={() => (navigation as any).navigate('ChatInfo', { otherUser })}>
                     <Icon name="information-circle-outline" size={24} color="#FFF" />
                 </TouchableOpacity>
             </View>
@@ -502,7 +601,7 @@ export function ChatScreen() {
             {/* Input Area */}
             <View style={[styles.inputContainer, { paddingBottom: insets.bottom + 12 }]}>
                 <View style={styles.inputPill}>
-                    <TouchableOpacity style={styles.iconButton}>
+                    <TouchableOpacity style={styles.iconButton} onPress={() => setAttachmentModalVisible(true)}>
                         <Icon name="add" size={24} color="#888" />
                     </TouchableOpacity>
 
@@ -531,6 +630,58 @@ export function ChatScreen() {
                     <Icon name="arrow-up" size={24} color="#000" />
                 </TouchableOpacity>
             </View>
+
+            {/* Attachment Modal */}
+            <AttachmentModal
+                visible={attachmentModalVisible}
+                onClose={() => setAttachmentModalVisible(false)}
+                onMusicPress={() => {
+                    setAttachmentModalVisible(false);
+                    setSongModalVisible(true);
+                }}
+                onGalleryPress={() => {
+                    setAttachmentModalVisible(false);
+                    console.log('Galeri özelliği henüz hazır değil');
+                }}
+                onCameraPress={() => {
+                    setAttachmentModalVisible(false);
+                    console.log('Kamera özelliği henüz hazır değil');
+                }}
+            />
+
+            {/* Song Search Modal */}
+            <SongSearchModal
+                visible={songModalVisible}
+                onClose={() => setSongModalVisible(false)}
+                onSelectSong={async (track) => {
+                    setSongModalVisible(false);
+                    // Şarkı bilgilerini JSON olarak sakla
+                    const trackData = {
+                        id: track.spotify_track_id,
+                        name: track.track_name,
+                        artist: track.artist_name,
+                        image: track.album_image_url,
+                        uri: `spotify:track:${track.spotify_track_id}`,
+                    };
+
+                    if (!user?.id) return;
+
+                    setIsSending(true);
+                    const sent = await sendMessage(
+                        conversationId,
+                        user.id,
+                        otherUser.id,
+                        `🎵 ${track.track_name} - ${track.artist_name}`,
+                        'track',
+                        trackData
+                    );
+
+                    if (sent) {
+                        setMessages(prev => [...prev, sent]);
+                    }
+                    setIsSending(false);
+                }}
+            />
         </KeyboardAvoidingView>
     );
 }
@@ -691,5 +842,32 @@ const styles = StyleSheet.create({
         backgroundColor: '#1DB954',
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    trackMessageContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.surface,
+        borderRadius: 12,
+        padding: 8,
+        gap: 12,
+        width: '85%',
+        maxWidth: '85%',
+    },
+    trackImage: {
+        width: 50,
+        height: 50,
+        borderRadius: 6,
+    },
+    trackInfo: {
+        flex: 1,
+    },
+    trackName: {
+        color: '#FFF',
+        fontSize: FONT_SIZES.md,
+        fontWeight: '600',
+    },
+    trackArtist: {
+        color: COLORS.textSecondary,
+        fontSize: FONT_SIZES.sm,
     },
 });
