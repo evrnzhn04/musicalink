@@ -80,3 +80,6 @@ yarn-error.log
 .env.*.local
 
 *.md
+Supabase Schema.md
+RLS Polices.md
+task.md
