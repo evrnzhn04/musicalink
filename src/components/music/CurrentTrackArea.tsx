@@ -58,7 +58,7 @@ export function CurrentTrackArea() {
         <View style={styles.area}>
             <View style={{ flexDirection: 'row', gap: 10, flex: 3, }}>
                 <Image source={{ uri: currentTrack?.albumImage }} style={{ width: 40, height: 40, borderRadius: 5 }} />
-                <View>
+                <View style={{width:'80%'}}>
                     <Text style={styles.currentName} numberOfLines={1}>{currentTrack?.name}</Text>
                     <Text style={styles.currentArtist} numberOfLines={1}>{currentTrack?.artist}</Text>
                 </View>
@@ -111,10 +111,10 @@ const styles = StyleSheet.create({
         borderRadius: 10, position: 'absolute', bottom: 10, gap: 10
     },
     currentName: {
-        color: COLORS.text, fontWeight: 'bold', maxWidth: '85%'
+        color: COLORS.text, fontWeight: 'bold',width: '100%' ,maxWidth: '100%', //backgroundColor:'gray'
     },
     currentArtist: {
-        color: COLORS.text, maxWidth: '85%'
+        color: COLORS.text,width: '100%', maxWidth: '100%'
     },
     controlBtnArea: {
         flexDirection: 'row', alignItems: "center", gap: 5,

@@ -205,12 +205,11 @@ export const CreateProfileScreen = () => {
 
 const styles = StyleSheet.create({
     screen: {
-        flex: 1, alignItems: 'center', justifyContent: 'center',
+        flex: 1, alignItems: 'center', //justifyContent: 'center',
         backgroundColor: COLORS.background
     },
     image: {
-        width: 195, height: 192,
-        position: 'absolute', top: 50
+        width: 195, height: 192, marginTop:40
     },
     changePhotoArea: {
         width: '100%', padding: 3,

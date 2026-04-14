@@ -5,6 +5,7 @@ import {
 } from 'react-native-safe-area-context';
 import { AuthProvider } from './src/contexts/AuthContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { CreateProfileScreen } from './src/screens/auth/CreateProfileScreen';
 
 function App() {
   const isDarkMode = useColorScheme() === 'dark';

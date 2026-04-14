@@ -4,9 +4,6 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Ionicons';
-
-export const navigationRef = createNavigationContainerRef();
-
 import { useAuth } from '../contexts/AuthContext';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { CreateProfileScreen } from '../screens/auth/CreateProfileScreen';
@@ -21,6 +18,8 @@ import { getUniqueSenderCount, subscribeToUnreadCount } from '../services/messag
 import { FollowersScreen } from '../screens/friends/FollowersScreen';
 import { FollowingScreen } from '../screens/friends/FollowingScreen';
 import { ChatInfoScreen } from '../screens/chat/ChatInfoScreen';
+
+export const navigationRef = createNavigationContainerRef();
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();

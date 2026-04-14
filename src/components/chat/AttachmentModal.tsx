@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
     Modal,
     View,
@@ -6,9 +6,16 @@ import {
     StyleSheet,
     TouchableOpacity,
     TouchableWithoutFeedback,
+    Dimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import SpotifyIcon from 'react-native-vector-icons/Entypo';
 import { COLORS, FONT_SIZES } from '../../utils/constants';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, {
+    useSharedValue, useAnimatedStyle, withSpring,
+    withTiming, runOnJS, SlideInDown
+} from 'react-native-reanimated';
 
 interface AttachmentModalProps {
     visible: boolean;
@@ -18,6 +25,8 @@ interface AttachmentModalProps {
     onCameraPress: () => void;
 }
 
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
 export function AttachmentModal({
     visible,
     onClose,
@@ -25,11 +34,36 @@ export function AttachmentModal({
     onGalleryPress,
     onCameraPress,
 }: AttachmentModalProps) {
+    const translateY = useSharedValue(0);
+    useEffect(() => {
+        if (visible) translateY.value = 0;
+    }, [visible]);
+    const pan = Gesture.Pan()
+        .onChange((event) => {
+            // Sadece aşağı çekmeye izin ver
+            if (event.translationY > 0) {
+                translateY.value = event.translationY;
+            }
+        })
+        .onEnd(() => {
+            // 100 birimden fazla çekildiyse kapat, yoksa geri zıplat
+            if (translateY.value > 100) {
+                translateY.value = withTiming(SCREEN_HEIGHT, {}, () => {
+                    runOnJS(onClose)();
+                });
+            } else {
+                translateY.value = withSpring(0);
+            }
+        });
+    const animatedStyle = useAnimatedStyle(() => ({
+        transform: [{ translateY: translateY.value }],
+    }));
+
     const options = [
         {
-            icon: 'musical-notes',
+            icon: 'spotify',
             label: 'Şarkı Seç',
-            color: '#1DB954',
+            color: COLORS.surface,
             onPress: onMusicPress,
         },
         {
@@ -50,33 +84,42 @@ export function AttachmentModal({
         <Modal
             visible={visible}
             transparent
-            animationType="slide"
+            animationType="fade"
             onRequestClose={onClose}
         >
-            <TouchableWithoutFeedback onPress={onClose}>
-                <View style={styles.overlay}>
-                    <TouchableWithoutFeedback>
-                        <View style={styles.container}>
-                            <View style={styles.handle} />
-                            <Text style={styles.title}>Ekle</Text>
-                            <View style={styles.optionsRow}>
-                                {options.map((option, index) => (
-                                    <TouchableOpacity
-                                        key={index}
-                                        style={styles.optionButton}
-                                        onPress={option.onPress}
-                                    >
-                                        <View style={[styles.iconCircle, { backgroundColor: option.color }]}>
-                                            <Icon name={option.icon} size={28} color="#FFF" />
-                                        </View>
-                                        <Text style={styles.optionLabel}>{option.label}</Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        </View>
-                    </TouchableWithoutFeedback>
-                </View>
-            </TouchableWithoutFeedback>
+            <GestureHandlerRootView style={{ flex: 1 }}>
+                <TouchableWithoutFeedback onPress={onClose}>
+                    <View style={styles.overlay}>
+                        <TouchableWithoutFeedback>
+                            <GestureDetector gesture={pan}>
+                                <Animated.View
+                                    entering={SlideInDown}
+                                    style={[styles.container, animatedStyle]}
+                                >
+                                    <View style={styles.handle} />
+                                    <Text style={styles.title}>Ekle</Text>
+                                    <View style={styles.optionsRow}>
+                                        {options.map((option, index) => (
+                                            <TouchableOpacity
+                                                key={index}
+                                                style={styles.optionButton}
+                                                onPress={option.onPress}
+                                            >
+                                                <View style={[styles.iconCircle, { backgroundColor: option.color }]}>
+                                                    {option.icon === 'spotify' ? (<SpotifyIcon name='spotify' size={58} color={'#1DB954'} />)
+                                                        : (<Icon name={option.icon} size={28} color="#FFF" />)
+                                                    }
+                                                </View>
+                                                <Text style={styles.optionLabel}>{option.label}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </Animated.View>
+                            </GestureDetector>
+                        </TouchableWithoutFeedback>
+                    </View>
+                </TouchableWithoutFeedback>
+            </GestureHandlerRootView>
         </Modal>
     );
 }
@@ -126,7 +169,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     optionLabel: {
-        fontSize: FONT_SIZES.sm,
+        fontSize: FONT_SIZES.sm, fontWeight: 'bold',
         color: COLORS.text,
     },
 });

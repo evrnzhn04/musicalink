@@ -10,7 +10,9 @@ import {
     Image,
     AppState,
     AppStateStatus,
-    Linking
+    Linking,
+    PermissionsAndroid,
+    ToastAndroid
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,6 +35,13 @@ import { AttachmentModal } from '../../components/chat/AttachmentModal';
 import { SongSearchModal } from '../../components/profile/SongSearchModal';
 import { SpotifyPlayModal } from '../../components/chat/SpotifyPlayModal';
 import { playTrack } from '../../services/spotifyService';
+import { InformationModal } from '../../components/common/InformaitonModal';
+import AudioRecorderPlayer, {
+    RecordBackType,
+    PlayBackType
+} from 'react-native-audio-recorder-player';
+import RNFS from 'react-native-fs';
+import { decode } from 'base64-arraybuffer';
 
 type ChatRouteParams = {
     Chat: {
@@ -44,6 +53,8 @@ type ChatRouteParams = {
         };
     };
 };
+
+const audioRecorderPlayer = AudioRecorderPlayer;
 
 export function ChatScreen() {
     const navigation = useNavigation();
@@ -73,6 +84,250 @@ export function ChatScreen() {
 
     const conversationId = user?.id ? generateConversationId(user.id, otherUser.id) : '';
 
+    //InformationModal
+    const [isInfo, setIsInfo] = useState(false);
+
+    //Recording
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordSecs, setRecordSecs] = useState(0);
+
+    // Audio Playback State
+    const [currentPlayingMessageId, setCurrentPlayingMessageId] = useState<number | null>(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [currentPlaybackPos, setCurrentPlaybackPos] = useState('00:00');
+
+    // ... (Permissions and other code remain same)
+
+    //Sesli mesajı oynat
+    const playAudio = async (url: string, messageId: number) => {
+        //console.log('▶️ playAudio called for ID:', messageId);
+        try {
+            // Eğer aynı mesaja tıklandıysa: Durdur/Devam Et
+            if (currentPlayingMessageId === messageId) {
+                if (isPlaying) {
+                    //console.log('⏸️ Pausing...');
+                    await audioRecorderPlayer.pausePlayer();
+                    setIsPlaying(false);
+                } else {
+                    //console.log('▶️ Resuming...');
+                    await audioRecorderPlayer.resumePlayer();
+                    setIsPlaying(true);
+                }
+                return;
+            }
+
+            // Farklı bir mesajsa veya ilk kez çalınıyorsa:
+            // Öncekini durdur
+            try {
+                //console.log('⏹️ Stopping previous...');
+                await audioRecorderPlayer.stopPlayer();
+                audioRecorderPlayer.removePlayBackListener();
+            } catch (e) { }
+
+            // Yeni durumu ayarla
+            setCurrentPlayingMessageId(messageId);
+            setIsPlaying(true);
+
+            // Çalmaya başla
+            //console.log('🎵 Starting new...');
+            await audioRecorderPlayer.startPlayer(url);
+
+            audioRecorderPlayer.addPlayBackListener((e: PlayBackType) => {
+
+                //console.log('⏱️ Debug:', e.currentPosition, '/', e.duration);
+                // Süre dolduysa
+                if (e.duration > 0 && e.currentPosition === e.duration) {
+                    //console.log('🏁 Finished');
+                    audioRecorderPlayer.stopPlayer().catch(() => { });
+                    setIsPlaying(false);
+                    setCurrentPlayingMessageId(null);
+                    setCurrentPlaybackPos('00:00');
+                    return;
+                }
+
+                // Süreyi güncelle
+                // console.log('⏱️ Playback pos:', e.currentPosition);
+                setCurrentPlaybackPos(audioRecorderPlayer.mmss(Math.floor(e.currentPosition / 1000)));
+                return;
+            });
+        } catch (error) {
+            //console.log('❌ Oynatma hatası:', error);
+            setIsPlaying(false);
+            setCurrentPlayingMessageId(null);
+        }
+    };
+
+    // İzin Kontrolü
+    const checkPermissions = async () => {
+        if (Platform.OS === 'android') {
+            try {
+                // API 33 (Android 13) ve üzeri kontrolü
+                if (Platform.Version >= 33) {
+                    const grants = await PermissionsAndroid.requestMultiple([
+                        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+                        PermissionsAndroid.PERMISSIONS.READ_MEDIA_AUDIO,
+                    ]);
+
+                    if (
+                        grants['android.permission.RECORD_AUDIO'] === PermissionsAndroid.RESULTS.GRANTED
+                    ) {
+                        //console.log('✅ İzinler verildi (Android 13+)');
+                        return true;
+                    }
+                    //console.log('❌ İzinler reddedildi (Android 13+)');
+                    return false;
+                }
+
+                // Android 12 ve altı için
+                const grants = await PermissionsAndroid.requestMultiple([
+                    PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+                    PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+                    PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+                ]);
+
+                if (
+                    grants['android.permission.WRITE_EXTERNAL_STORAGE'] === PermissionsAndroid.RESULTS.GRANTED &&
+                    grants['android.permission.READ_EXTERNAL_STORAGE'] === PermissionsAndroid.RESULTS.GRANTED &&
+                    grants['android.permission.RECORD_AUDIO'] === PermissionsAndroid.RESULTS.GRANTED
+                ) {
+                    //console.log('✅ İzinler verildi');
+                    return true;
+                } else {
+                    //console.log('❌ İzinler reddedildi');
+                    return false;
+                }
+            } catch (err) {
+                //console.warn(err);
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // Kaydı Başlat
+    const onStartRecord = async () => {
+        //console.log('🔴 onStartRecord tetiklendi');
+        const hasPermission = await checkPermissions();
+        //console.log('🔍 İzin durumu:', hasPermission);
+
+        if (hasPermission) {
+            try {
+                setIsRecording(true);
+                //console.log('🎙️ startRecorder çağrılıyor (Kaliteli Mod)...');
+
+                const audioSet = {
+                    AudioEncoderAndroid: 3, // AAC
+                    AudioSourceAndroid: 7, // VOICE_COMMUNICATION (Eko Önleme + Gürültü Azaltma)
+                    AVEncoderAudioQualityKeyIOS: 96, // High
+                    AVNumberOfChannelsKeyIOS: 2,
+                    AVFormatIDKeyIOS: 'aac' as any,
+                    AudioSamplingRate: 44100, // 44.1kHz (Standart Kalite)
+                    AudioEncodingBitRate: 128000, // 128kbps
+                };
+
+                const result = await audioRecorderPlayer.startRecorder(undefined, audioSet);
+                //console.log('🎙️ startRecorder sonucu (uri):', result);
+
+                audioRecorderPlayer.addRecordBackListener((e: RecordBackType) => {
+                    // console.log('⏱️ Kayıt süresi:', e.currentPosition);
+                    setRecordSecs(Math.floor(e.currentPosition / 1000));
+                    return;
+                });
+            } catch (error) {
+                //console.error('❌ startRecorder hatası:', error);
+                setIsRecording(false);
+            }
+        }
+    };
+
+    // Kaydı Bitir
+    const onStopRecord = async () => {
+        //console.log('⬛ onStopRecord tetiklendi. isRecording:', isRecording);
+        if (!isRecording) return;
+
+        try {
+            //console.log('🛑 stopRecorder çağrılıyor...');
+            const result = await audioRecorderPlayer.stopRecorder();
+            //console.log('🛑 stopRecorder sonucu (dosya yolu):', result);
+
+            audioRecorderPlayer.removeRecordBackListener();
+
+            const currentDuration = recordSecs;
+            setIsRecording(false);
+            setRecordSecs(0);
+
+            // Dosyayı Yükle ve Gönder
+            //console.log('🚀 uploadAndSendAudio çağrılıyor. Süre:', currentDuration);
+            await uploadAndSendAudio(result, currentDuration);
+        } catch (error) {
+            //console.error('❌ onStopRecord hatası:', error);
+        }
+    };
+
+    // Ses Dosyasını Yükle ve Mesaj Gönder
+    const uploadAndSendAudio = async (uri: string, duration: number) => {
+        try {
+            //console.log('📤 uploadAndSendAudio başladı. Ham URI:', uri);
+
+            // Android için dosya yolu düzeltmesi
+            const filepath = Platform.OS === 'android' ? uri : uri.replace('file://', '');
+            //console.log('📂 İşlenmiş dosya yolu:', filepath);
+
+            // Dosyayı base64 oku
+            //console.log('📖 Dosya okunuyor...');
+            const base64 = await RNFS.readFile(filepath, 'base64');
+            //console.log('📖 Dosya okundu. Base64 uzunluğu:', base64.length);
+
+            const fileData = decode(base64);
+
+            // Dosya adı
+            const fileName = `voice_${user?.id}_${Date.now()}.m4a`;
+            //console.log('🏷️ Oluşturulan dosya adı:', fileName);
+
+            // Supabase'e yükle
+            //console.log('☁️ Supabase upload başlıyor...');
+            const { data, error: uploadError } = await supabase
+                .storage
+                .from('voice-messages')
+                .upload(fileName, fileData, {
+                    contentType: 'audio/m4a'
+                });
+
+            if (uploadError) {
+                //console.error('❌ Upload error:', uploadError);
+                return;
+            }
+            //console.log('✅ Upload başarılı:', data);
+
+            // Public URL al
+            const { data: { publicUrl } } = supabase
+                .storage
+                .from('voice-messages')
+                .getPublicUrl(fileName);
+            //console.log('🔗 Public URL:', publicUrl);
+
+            // Mesaj gönder
+            //console.log('📨 sendMessage çağrılıyor...');
+            const sent = await sendMessage(
+                conversationId,
+                user?.id || '',
+                otherUser.id,
+                '🎤 Sesli Mesaj',
+                'audio',
+                { audio_url: publicUrl, duration: duration }
+            );
+
+            //if (sent) console.log('✅ Mesaj başarıyla gönderildi!');
+            //else console.log('⚠️ Mesaj gönderilemedi (sendMessage null döndü)');
+
+        } catch (err: any) {
+            ToastAndroid.show("Ses gönderilemedi!", ToastAndroid.SHORT);
+            console.error('❌ Ses gönderme hatası (Catch):', err);
+            console.error('❌ Hata detayı:', err.message);
+        }
+    };
+
+
     // AppState listener
     useEffect(() => {
         const subscription = AppState.addEventListener('change', nextAppState => {
@@ -80,7 +335,7 @@ export function ChatScreen() {
                 appState.current.match(/inactive|background/) &&
                 nextAppState === 'active'
             ) {
-                console.log('📱 App foregrounda geldi, mesajlar okundu işaretleniyor');
+                //console.log('📱 App foregrounda geldi, mesajlar okundu işaretleniyor');
                 if (user?.id && conversationId) {
                     markMessagesAsRead(conversationId, user.id);
                 }
@@ -458,6 +713,91 @@ export function ChatScreen() {
             );
         }
 
+        // Sesli Mesaj
+        if (item.message_type === 'audio' && item.track_data) {
+            return (
+                <View style={{ marginBottom: showTime ? 12 : 4, width: '100%' }}>
+                    {/* Tarih Ayıracı */}
+                    {showDateSeparator && (
+                        <View style={styles.dateSeparator}>
+                            <View style={styles.dateBadge}>
+                                <Text style={styles.dateBadgeText}>{formatRelativeDate(item.created_at)}</Text>
+                            </View>
+                        </View>
+                    )}
+
+                    <View style={[
+                        styles.messageRow,
+                        isMe ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' },
+                        { marginBottom: showAvatar ? 16 : 4 }
+                    ]}>
+                        {!isMe && (
+                            <View style={styles.avatarContainer}>
+                                {showAvatar ? (
+                                    otherUser.avatar_url ? <Image source={{ uri: otherUser.avatar_url }} style={styles.messageAvatar} /> : <DefaultProfilePhoto size={28} />
+                                ) : <View style={styles.avatarPlaceholder} />}
+                            </View>
+                        )}
+
+                        <View style={styles.messageContentContainer}>
+                            <View style={[
+                                styles.messageBubble,
+                                isMe ? styles.myBubble : styles.theirBubble,
+                                {
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    padding: 10,
+                                    minWidth: 180,
+                                    borderTopLeftRadius: 18,
+                                    borderTopRightRadius: 18,
+                                    borderBottomLeftRadius: isMe ? 18 : (isLastInGroup ? 4 : 18),
+                                    borderBottomRightRadius: isMe ? (isLastInGroup ? 4 : 18) : 18
+                                }
+                            ]}>
+                                <TouchableOpacity onPress={() => playAudio(item.track_data.audio_url, item.id)}>
+                                    <Icon
+                                        name={currentPlayingMessageId === item.id && isPlaying ? "pause" : "play"}
+                                        size={28}
+                                        color={COLORS.text}
+                                    />
+                                </TouchableOpacity>
+                                <View style={{ marginLeft: 12 }}>
+                                    <Text style={{ color: COLORS.text, fontWeight: 'bold', fontSize: 13 }}>Sesli Mesaj</Text>
+                                    <Text style={{ color: COLORS.text, fontSize: 11, marginTop: 2, opacity: 0.8 }}>
+                                        {currentPlayingMessageId === item.id
+                                            ? `${currentPlaybackPos} / ${item.track_data.duration} sn`
+                                            : `${item.track_data.duration} sn`
+                                        }
+                                    </Text>
+                                </View>
+                            </View>
+
+                            {/* Saat ve Görüldü */}
+                            {showTime && (
+                                <View style={[
+                                    styles.messageFooter,
+                                    isMe ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }
+                                ]}>
+                                    <Text style={styles.messageTime}>
+                                        {new Date(item.created_at).toLocaleTimeString('tr-TR', {
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                        })}
+                                    </Text>
+                                    {isMe && item.is_read && (
+                                        <View style={styles.readIndicator}>
+                                            <Text style={styles.readText}>Görüldü</Text>
+                                            <Icon name="checkmark-done" size={14} color="#1DB954" />
+                                        </View>
+                                    )}
+                                </View>
+                            )}
+                        </View>
+                    </View>
+                </View>
+            );
+        }
+
         return (
             <>
                 {/* Tarih Ayıracı */}
@@ -537,7 +877,7 @@ export function ChatScreen() {
                 </View>
             </>
         );
-    }, [messages, user?.id, otherUser.avatar_url]);
+    }, [messages, user?.id, otherUser.avatar_url, currentPlayingMessageId, isPlaying, currentPlaybackPos]);
 
     // Spotify'da şarkı aç (Web API ile)
     const openSpotifyTrack = async (trackData: { name: string; artist: string; image: string; uri: string }) => {
@@ -617,6 +957,7 @@ export function ChatScreen() {
                 <FlashList
                     ref={flashListRef}
                     data={messages}
+                    extraData={{ currentPlayingMessageId, isPlaying, currentPlaybackPos }}
                     keyExtractor={(item) => item.id.toString()}
                     renderItem={renderMessage}
                     drawDistance={250}
@@ -640,21 +981,45 @@ export function ChatScreen() {
             {/* Input Area */}
             <View style={[styles.inputContainer, { paddingBottom: insets.bottom + 12 }]}>
                 <View style={styles.inputPill}>
-                    <TouchableOpacity style={styles.iconButton} onPress={() => setAttachmentModalVisible(true)}>
-                        <Icon name="add" size={24} color="#888" />
-                    </TouchableOpacity>
+                    {isRecording ? (
+                        <View style={styles.recordingContainer}>
+                            <Icon name="mic" size={20} color="#FF4444" style={styles.recordingIcon} />
+                            <Text style={styles.recordingText}>
+                                Kaydediliyor... {audioRecorderPlayer.mmss(recordSecs)}
+                            </Text>
+                        </View>
+                    ) : (
+                        <>
+                            <TouchableOpacity style={styles.iconButton} onPress={() => setAttachmentModalVisible(true)}>
+                                <Icon name="add" size={24} color="#888" />
+                            </TouchableOpacity>
 
-                    <TextInput
-                        style={styles.textInput}
-                        value={inputText}
-                        onChangeText={setInputText}
-                        placeholder="Mesaj yazın..."
-                        placeholderTextColor="#666"
-                        multiline
-                    />
+                            <TextInput
+                                style={styles.textInput}
+                                value={inputText}
+                                onChangeText={setInputText}
+                                placeholder="Mesaj yazın..."
+                                placeholderTextColor="#666"
+                                multiline
+                            />
+                        </>
+                    )}
 
-                    <TouchableOpacity style={styles.iconButton}>
-                        <Icon name="mic-outline" size={22} color="#888" />
+                    <TouchableOpacity
+                        style={[
+                            styles.iconButton,
+                            isRecording && { backgroundColor: '#FF4444', borderRadius: 20 }
+                        ]}
+                        onLongPress={onStartRecord}
+                        onPressOut={onStopRecord}
+                        delayLongPress={300}
+                    >
+                        <Icon
+                            name={isRecording ? "mic" : "mic-outline"}
+                            size={isRecording ? 24 : 22}
+                            color={isRecording ? "#FFF" : "#888"}
+                            style={isRecording ? { transform: [{ scale: 1.1 }] } : undefined}
+                        />
                     </TouchableOpacity>
                 </View>
 
@@ -680,10 +1045,12 @@ export function ChatScreen() {
                 }}
                 onGalleryPress={() => {
                     setAttachmentModalVisible(false);
+                    setIsInfo(true);
                     //console.log('Galeri özelliği henüz hazır değil');
                 }}
                 onCameraPress={() => {
                     setAttachmentModalVisible(false);
+                    setIsInfo(true);
                     //console.log('Kamera özelliği henüz hazır değil');
                 }}
             />
@@ -732,6 +1099,8 @@ export function ChatScreen() {
                 onShufflePlay={handleShufflePlay}
                 trackData={selectedTrackForPlay || undefined}
             />
+
+            <InformationModal visible={isInfo} onClose={() => setIsInfo(false)} />
         </KeyboardAvoidingView>
     );
 }
@@ -779,6 +1148,21 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#1DB954',
         flex: 1,
+    },
+    recordingContainer: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 10,
+    },
+    recordingText: {
+        color: COLORS.text,//'#FF4444'
+        fontSize: 14,
+        fontWeight: '600',
+        marginLeft: 8,
+    },
+    recordingIcon: {
+        opacity: 0.8,
     },
     dateSeparator: {
         alignItems: 'center',

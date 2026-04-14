@@ -15,16 +15,16 @@ export interface SpotifyUser {
 export interface UserProfile {
     id: string;
     username: string;
-    display_name: string;     // snake_case
-    avatar_url: string | null; // snake_case
-    spotify_id: string;        // snake_case
+    display_name: string;
+    avatar_url: string | null;
+    spotify_id: string;
     email: string;
     bio: string | null;
-    current_track?: any;       // snake_case
-    is_online?: boolean;       // snake_case
-    last_seen?: string;        // snake_case
-    created_at?: string;       // snake_case
-    updated_at?: string;       // snake_case
+    current_track?: any;
+    is_online?: boolean;
+    last_seen?: string;
+    created_at?: string;
+    updated_at?: string;
 }
 
 export interface AuthState {
